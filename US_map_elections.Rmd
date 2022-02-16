@@ -59,7 +59,7 @@ you can save the data into a csv file:
 4. Upload data and shape files
 
 ```{r shapefileupload, message = FALSE}
-setwd("/Users/ac1y15/Google Drive/blog")
+setwd("...")
 ```
 ```{r shapefiles, message = FALSE}
 dt <- read.csv("new_county_election_2016.csv", header=T)
