@@ -1,0 +1,173 @@
+---
+title: "Global and Local Measures of Spatial Autocorrelation"
+author: "acarioli"
+date: "13/09/2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Global and Local Measures of Spatial Autocorrelation
+
+This post aims at being a summary of the available techniques to investivate spatial autocorrelation for the social sciences, rather than presenting the theory behind spatial autocorrelation. For that there are great books available on line, like Anselin's, Le Page, and Bivand just to cite a few.
+
+The techniques presented here work for a spatial polygons data frame. The difference between spatial points and polygons data frames is not that big, the idea is the same and most of what I am doing here can be applied to data points. 
+
+Spatial autocorrelation can be investigated **globally** or **locally**. **Globally**, means that the measure you're going to obtain refers to the dataset as a whole, whether it is a whole country, continent or region. **Locally**, means that you are taking into consideration each and every polygon and getting a measure for each one of them.
+
+We start by uploading the data, projecting them (important when considering the distance based measures -earth is not flat, whatever they may say!), and construct neighborhood relations (in this case Queen and Rook, but could be anything). For more detail see [this post](https://aledemogr.wordpress.com/2015/10/09/creating-neighborhood-matrices-for-spatial-polygons/) on how to construct neigh. relations.
+
+```{r one}
+library(maptools)
+library(spdep)
+NC= readShapePoly(system.file("shapes/sids.shp", package="maptools")[1], IDvar="FIPSNO", proj4string=CRS("+proj=longlat +ellps=clrk66"))
+nb.FOQ = poly2nb(NC, queen=TRUE, row.names=NC$FIPSNO)
+nb.RK = poly2nb(NC, queen=FALSE, row.names=NC$FIPSNO)
+```
+
+### Global measures of spatial autocorrelation
+
+There are two main measures for global spatial autocorrelation: **Moran's I** and **Geary's C**. **Moran's I** is definitely the most used in my experience, but both work.
+**Moran's I** ranges between -1 (strong negative spatial autocorrelation) and 1 (strong positive spatial autocorrelation) with 0 being the absence of any spatial autocorrelation. 
+**Geary's C** ranges between 0 and 2, with positive spatial autocorrelation ranging from 0 to 1 and negative spatial autocorrelation between 1 and 2.
+Of course being these inferential measures, if the p-value is non significant we cannot exclude that the patterns could be random(!).
+
+```{r two}
+library(spdep)
+nwb <-NC$NWBIR74 
+moran.test(nwb, listw = nb2listw(nb.RK))
+geary.test(nwb, listw = nb2listw(nb.RK))
+```
+if you have polygons with no neighbors remember to specify ```zero.policy=NULL```
+```{r four}
+moran.plot(nwb, listw = nb2listw(nb.RK))
+```
+
+```{r three}
+moran.mc(nwb, listw = nb2listw(nb.RK), nsim=9999)
+plot(moran.mc(nwb, listw = nb2listw(nb.RK), nsim=9999))
+```
+Same thing can be done for Geary's C:
+```{r five}
+geary.mc(nwb, listw = nb2listw(nb.RK), nsim=100)
+plot(geary.mc(nwb, listw = nb2listw(nb.RK), nsim=100))
+```
+
+### Local measures of spatial autocorrelation
+
+**Local Moran and Local G**
+
+```{r six}
+locm <- localmoran(nwb, listw = nb2listw(nb.RK))
+locG <- localG(nwb, listw = nb2listw(nb.RK))
+```
+
+Get the neighbor matrix into a listwise format with ```listw```: there's two options here, row-standardized weights matrix ```style = "W"``` creates proportional weights when polygons have an unequal number of neighbors, balancing out observations with few neighbors. Binary weights ```style = "B"``` upweight observations with many neighbors.
+
+```{r seven}
+library(classInt)
+library(dplyr)
+
+myvar <- NC$NWBIR74
+nb <- nb.RK
+# Define weight style
+ws <- c("W")
+
+# Define significance for the maps
+significance <- 0.05
+plot.only.significant <- TRUE
+
+# Transform the neigh mtx into a listwise object
+listw <- nb2listw(nb, style=ws)
+
+# Create the lagged variable
+lagvar <- lag.listw(listw, myvar)
+
+# get the mean of each
+m.myvar <- mean(myvar)
+m.lagvar <- mean(lagvar)
+```
+
+The next step is to derive the quadrants and set the coloring scheme. I like to color the border of each polygon with the color of their local moran score, regardless of their pvalue, and then fill only the significant ones.
+
+```{r eight}
+n <- length(NC)
+# 
+vec <- c(1:n)
+vec <- ifelse(locm[,5] < significance, 1,0)
+
+# Derive quadrants
+q <- c(1:n)
+for (i in 1:n) {
+  if (myvar[[i]]>=m.myvar & lagvar[[i]]>=m.lagvar) q[i] <- 1
+  if (myvar[[i]]<m.myvar & lagvar[[i]]<m.lagvar) q[i] <- 2
+  if (myvar[[i]]<m.myvar & lagvar[[i]]>=m.lagvar) q[i] <- 3
+  if (myvar[[i]]>=m.myvar & lagvar[[i]]<m.lagvar) q[i] <- 4
+}
+
+# set coloring scheme
+q.all <- q
+colors <- c(1:n)
+for (i in 1:n) {
+  if (q.all[i]==1) colors[i] <- "red"
+  if (q.all[i]==2) colors[i] <- "blue"
+  if (q.all[i]==3) colors[i] <- "lightblue"
+  if (q.all[i]==4) colors[i] <- "pink"
+  if (q.all[i]==0) colors[i] <- "white"
+  if (q.all[i]>4) colors[i] <- "white"
+}
+
+# Mark all non-significant regions white
+locm.dt <- q*vec
+colors1 <- colors
+for (i in 1:n)
+{
+  if ( !(is.na (locm.dt[i])) )  {
+  if (locm.dt[i]==0) colors1[i] <- "white"
+}
+}
+colors2 <- colors
+colors2 <- paste(colors2,vec)
+pos = list()
+for (i in 1:n) {
+  pos[[i]] <- c(which(NC$NWBIR74==colors2["blue 0"]))
+}
+
+blue0 <- which(colors2=="blue 0")
+red0 <- which(colors2=="red 0")
+lightblue0 <- which(colors2=="lightblue 0")
+pink0 <- which(colors2=="pink 0")
+lb <- 6
+labels=c("High-High", "High-Low", "Low-High", "Low-Low")
+
+
+# plot the map
+if (plot.only.significant==TRUE) plot(NC, col=colors1,border=F) else
+  plot(NC, col=colors,border=F)
+plot(NC[blue0,],border="blue",lwd=0.5,add=T)
+plot(NC[lightblue0,],border="lightblue",add=T,lwd=0.5)
+plot(NC[red0,],border="red",add=T,lwd=0.5)
+plot(NC[pink0,],border="pink",add=T,lwd=0.5)
+legend("bottomleft", legend = labels, fill = c("red", "pink", "lightblue", "blue"), bty = "n")
+```
+Local G gives back z-scores values and indicate the posibility of a local cluster of high values of the variable being analysed, very low values indicate a similar cluster of low values. 
+
+```{r nine, echo=TRUE}
+library(RColorBrewer)
+
+nclassint <- 3
+colpal <- brewer.pal(nclassint,"PiYG")
+cat <- classIntervals(locG, nclassint, style = "jenks", na.ignore=T)
+color.z <- findColours(cat, colpal)
+
+plot(NC, col= color.z, border=T)
+
+# color only significant polygons
+plot(NC, border=T)
+plot(NC[which(vec==1),], col=color.z[which(vec==1)], border=T, add=T)
+```
+
