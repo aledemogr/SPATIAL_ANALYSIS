@@ -1,0 +1,68 @@
+---
+title: "Moran plots in ggplot2"
+author: "AC"
+date: "April 22, 2015"
+output: html_document
+---
+```{r}
+library(spdep)
+library(ggplot2)
+library(grid)
+```
+
+```{r}
+data(afcon)
+varofint <- afcon$totcon
+listw <- nb2listw(paper.nb) #neigh. relations
+varlag <- lag.listw(listw, varofint)
+var.name <- "Total Conflicts"
+m.varofint <- mean(varofint)
+m.varlag <- mean(varlag)
+lisa <- localmoran(varofint, listw)
+
+df <- as.data.frame(cbind(area=c(seq(1,length(varofint),by=1)),varofint,varlag,m.varofint,m.varlag))
+df$sector <- c(rep(0,length(varofint)))
+significance <- 0.05
+vec <- ifelse(lisa[,5] < significance, 1,0)
+df$sector[df$varofint>=df$m.varofint & df$varlag>=df$m.varlag]  <- 1
+df$sector[df$varofint<df$m.varofint & df$varlag<df$m.varlag]  <- 2
+df$sector[df$varofint<df$m.varofint & df$varlag>=df$m.varlag]  <- 3
+df$sector[df$varofint>=df$m.varofint & df$varlag<df$m.varlag]  <- 4
+
+df$sec.data <- df$sector*vec
+
+df$sector.col[df$sec.data==1] <- "red"
+df$sector.col[df$sec.data==2] <- "blue"
+df$sector.col[df$sec.data==3] <- "lightblue"
+df$sector.col[df$sec.data==4] <- "pink"
+df$sector.col[df$sec.data==0] <- "white"
+
+df$sizevar <- abs(varofint-varlag)
+df$sizevar <- factor(df$sizevar>0.1)
+df$FILL <- factor(df$sec.data+1)
+df$BORDER <- factor(df$sector.col)
+
+p <- ggplot(df, aes(varofint, varlag))
+p +geom_point(aes(  fill=df$FILL),colour="black",size=6,shape=21)+
+  scale_colour_manual(name="",values = c("1"="red", "2"="blue","3"="lightblue","4"="pink"), guide=F)+
+  scale_fill_manual(name="",values = c("1"="white", "2"="red", "3"="blue","4"="lightblue","5"="pink"),labels = c("p-value>0.05", "High-High", "Low-Low","Low-High","High-Low"))+
+  scale_x_continuous(name=var.name)+
+  scale_y_continuous(name=paste("Lagged",var.name))+
+  theme(axis.line=element_line(color="black"),
+        axis.title.x=element_text(size=20,face="bold",vjust=0.1),
+        axis.title.y=element_text(size=20,face="bold",vjust=0.1),
+        axis.text= element_text(colour="black", size=20, angle=0,face = "plain"),
+        plot.margin=unit(c(0,1.5,0.5,2),"lines"),
+        panel.background=element_rect(fill="white",colour="black"),
+        panel.grid=element_line(colour="grey"),
+        axis.text.x  = element_text(hjust=.5, vjust=.5),
+        axis.text.y  = element_text(hjust=1, vjust=1),
+        strip.text.x  = element_text(size = 20, colour ="black", angle = 0),
+        plot.title= element_text(size=20))+
+  stat_smooth(method="lm",se=F,colour="black", size=1)+
+  geom_vline(xintercept=m.varofint,colour="black",linetype="longdash")+
+  geom_hline(yintercept=m.varlag,colour="black",linetype="longdash")+
+  theme(legend.background =element_rect("white"))+
+  theme(legend.key=element_rect("white",colour="white"),
+        legend.text =element_text(size=20))
+```
