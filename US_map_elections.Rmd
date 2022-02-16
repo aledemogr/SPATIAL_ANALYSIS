@@ -1,0 +1,116 @@
+---
+title: "A map of the US election results"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+1. Upload libraries:
+  
+```{r libr, message = FALSE}
+rm(list = ls(all=T)) #clear workspace
+library(dplyr)
+library(readr)
+library(stringr)
+library(tidyr)
+library(readxl)
+library(classInt)
+library(RColorBrewer)
+library(maptools) #to read shapefiles
+```
+2. Download the data files (note they are not ready for use but need some cleaning as there are more areas in the excel files than polygons in the shape file). I copy here the code as I have used it in my script but it's available at <a href="https://rpubs.com/dgrtwo/county-results>RPubs</a> thanks to David Robinson.
+
+```{r download data, message = FALSE}
+download.file("http://www2.census.gov/prod2/statcomp/usac/excel/LND01.xls", "LND01.xls")
+download.file("http://www2.census.gov/prod2/statcomp/usac/excel/POP01.xls", "POP01.xls")
+```
+according to metadata, this is Land Area in 2010 and resident population in 2010:
+```{r us_county, message = TRUE}
+us_county_area <- read_excel("LND01.xls") %>%
+  transmute(CountyCode = as.character(as.integer(STCOU)), Area = LND110210D)
+
+us_county_population <- read_excel("POP01.xls") %>%
+  transmute(CountyCode = as.character(as.integer(STCOU)),Population = POP010210D)
+```
+3. Adjust data
+```{r adjust data, message = FALSE}
+election_url <- "https://raw.githubusercontent.com/Prooffreader/election_2016_data/master/data/presidential_general_election_2016_by_county.csv"
+county_data <- read_csv(election_url) %>%
+  group_by(CountyCode = as.character(fips)) %>%
+  mutate(TotalVotes = sum(votes)) %>%
+  ungroup() %>%
+  mutate(name = str_replace(name, ".\\. ", "")) %>%
+  filter(name %in% c("Trump", "Clinton", "Johnson", "Stein")) %>%
+  transmute(County = str_replace(geo_name, " County", ""),
+            State = state,
+            CountyCode = as.character(fips),
+            Candidate = name,
+            Percent = vote_pct / 100,
+            TotalVotes) %>%
+  spread(Candidate, Percent, fill = 0) %>%
+  inner_join(us_county_population, by = "CountyCode") %>%
+  inner_join(us_county_area, by = "CountyCode")
+```
+you can save the data into a csv file:
+```{r libraries, message = FALSE}
+# write_csv(county_data, "county_election_2016.csv")
+```
+4. Upload data and shape files
+
+```{r shapefileupload, message = FALSE}
+setwd("/Users/ac1y15/Google Drive/blog")
+```
+```{r shapefiles, message = FALSE}
+dt <- read.csv("new_county_election_2016.csv", header=T)
+us <- readShapePoly("./USA_adm/USA_adm2.shp")
+us0 <- readShapePoly("./USA_adm/USA_adm0.shp")
+us.m <- us[-c(which(us$NAME_1=="Alaska")),] #get rid of Alaska
+us.d <- us.m[-c(67:71),]
+```
+5. Prepare color palette
+```{r palette, message = FALSE}
+nclassint <- 5 #number of colors to be used in the palette
+cat.T <- classIntervals(dt$Trump[-c(67:71)], nclassint,style = "jenks") #style refers to how the breaks are created
+colpal.T <- brewer.pal(nclassint,"Reds")
+color.T <- findColours(cat.T,colpal.T) #sequential
+bins.T <- cat.T$brks
+lb.T <- length(bins.T)
+```
+6. Plot the map with map basic...
+```{r plot1, message = FALSE}
+# pdf("Where are the trump voters.pdf")
+# plot(us.d, col=color.T, border=F)
+# plot(us0,add=T, lwd=0.1)
+# legend("bottomleft",fill=colpal.T,legend=paste(round(bins[-length(bins.T)],1),":",round(bins.T[-1],1)),cex=1, bg="white")
+# dev.off()
+```
+... or ggplot2
+
+```{r plot2, message = FALSE}
+library(ggplot2)
+library(scales)
+theme_set(theme_bw())
+
+ggplot(county_data, aes(Population / Area, Trump)) +
+  geom_point() +
+  geom_point(data=county_data[which(county_data$State=="Texas"),], aes(x=Population/Area, y=Trump), colour="red")+
+  scale_x_log10() +
+  scale_y_continuous(labels = percent_format()) +
+  xlab("Population density (ppl / square mile)") +
+  ylab("% of votes going to Trump") +
+  geom_text(aes(label = County), vjust = 1, hjust = 1, check_overlap = TRUE) +
+  geom_smooth(method = "lm") +
+  ggtitle("Population density vs Trump voters by county (Texas Counties in red)")
+
+# ggplot(county_data, aes(Population / Area, Trump)) +
+#   geom_point() +
+#   geom_point(data=county_data[which(county_data$State=="California"),], aes(x=Population/Area, y=Trump), colour="red")+
+#   scale_x_log10() +
+#   scale_y_continuous(labels = percent_format()) +
+#   xlab("Population density (ppl / square mile)") +
+#   ylab("% of votes going to Trump") +
+#   geom_text(data=county_data[which(county_data$State=="California"),], aes(label = ifelse(Trump>.5, as.character(dt$County), "" )), color= "red",size=5,vjust = 1, hjust = 1, check_overlap = TRUE) +
+#   geom_smooth(method = "lm") +
+#   ggtitle("Population density vs Trump voters by county (California in red)")
+```
